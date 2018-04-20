@@ -10,17 +10,49 @@ class Connection implements ConnectionContract, CommonsContract
 {
 
     private $socketConnection;
+    
+    private $id;
+
+    /**
+     * WebSocketServer constructor.
+     * @param WebSocket $handler
+     * @param array $config
+     */
+    public function __construct($sockConn)
+    {
+        $this->socketConnection = $sockConn;
+        $this->id = uniqid();
+    }
 
     /**
      * @param $sockConn
      * @return $this
+     * @deprecated use constructor instead
      */
     public function getConnection($sockConn) : self
     {
-        $this->socketConnection = $sockConn;
-        return $this;
+        trigger_error('Method getConnection() is deprecated, use new Connection() instead.', E_USER_DEPRECATED);
+        return new Connection($sockConn);
     }
-
+    
+    /**
+     * Returns unique id of connection
+     * @return string
+     */
+    public function getId() 
+    {
+        return $this->id;
+    }
+    
+    /**
+     * Returns socket
+     * @return resource
+     */
+    public function getSocket()
+    {
+        return $this->socketConnection;
+    }
+    
     /**
      * Closes clients socket stream
      */

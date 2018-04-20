@@ -14,6 +14,10 @@ use WSSC\Exceptions\WebSocketException;
 class WebSocketServer implements WebSocketServerContract, CommonsContract
 {
 
+    /**
+     * Array Connection objects (active clients)
+     * @var array
+     */
     private $clients = [];
     // set any template You need ex.: GET /subscription/messenger/token
     private $pathParams = [];
@@ -23,8 +27,6 @@ class WebSocketServer implements WebSocketServerContract, CommonsContract
     private $totalClients = 0;
     private $maxClients = 1;
     private $handler;
-    private $connImpl;
-    private $cureentConn;
     // for the very 1st time must be true
     private $stepRecursion = true;
 
@@ -54,7 +56,6 @@ class WebSocketServer implements WebSocketServerContract, CommonsContract
         ini_set('default_socket_timeout', 5); // this should be >= 5 sec, otherwise there will be broken pipe - tested
         $this->handler = $handler;
         $this->config = $config;
-        $this->connImpl = new Connection();
     }
 
     /**
@@ -121,8 +122,10 @@ class WebSocketServer implements WebSocketServerContract, CommonsContract
             }
 
             //prepare readable sockets
-            $readSocks = $this->clients;
-            $readSocks[] = $server;
+            $readSocks = [$server];
+            foreach($this->clients as $client) {
+                $readSocks[] = $client->getSocket();
+            }
 
             //start reading and use a large timeout
             if (!stream_select($readSocks, $write, $except, self::STREAM_SELECT_TIMEOUT)) {
@@ -154,11 +157,12 @@ class WebSocketServer implements WebSocketServerContract, CommonsContract
             if (empty($this->handler->pathParams[0]) === false) {
                 $this->setPathParams($headers);
             }
-            $this->clients[] = $newClient;
+            $newClientConnection = new Connection($newClient);
+            $this->clients[$newClientConnection->getId()] = $newClientConnection;
             $this->stepRecursion = true; // set on new client coz of remainder % is always 0
             // trigger OPEN event
-            $this->handler->onOpen($this->connImpl->getConnection($newClient));
-            $this->handshake($newClient, $headers);
+            $this->handler->onOpen($newClientConnection);
+            $this->handshake($newClientConnection, $headers);
         }
         //delete the server socket from the read sockets
         unset($readSocks[array_search($server, $readSocks, false)]);
@@ -176,24 +180,25 @@ class WebSocketServer implements WebSocketServerContract, CommonsContract
             $data = $this->decode(fread($sock, self::MAX_BYTES_READ));
             $dataType = $data['type'];
             $dataPayload = $data['payload'];
+            
             // to manipulate connection through send/close methods via handler, specified in IConnection
-            $this->cureentConn = $this->connImpl->getConnection($sock);
+            $client = $this->findClient($sock);
             if (empty($data) || $dataType === self::EVENT_TYPE_CLOSE) { // close event triggered from client - browser tab or close socket event
                 // trigger CLOSE event
                 try {
-                    $this->handler->onClose($this->cureentConn);
+                    $this->handler->onClose($client);
                 } catch (WebSocketException $e) {
                     $e->printStack();
                 }
                 // to avoid event leaks
-                unset($this->clients[array_search($sock, $this->clients)], $readSocks[$kSock]);
+                unset($this->clients[$client->getId()], $readSocks[$kSock]);
                 continue;
             }
 
             if (method_exists($this->handler, self::MAP_EVENT_TYPE_TO_METHODS[$dataType])) {
                 try {
                     // dynamic call: onMessage, onPing, onPong
-                    $this->handler->{self::MAP_EVENT_TYPE_TO_METHODS[$dataType]}($this->cureentConn, $dataPayload);
+                    $this->handler->{self::MAP_EVENT_TYPE_TO_METHODS[$dataType]}($client, $dataPayload);
                 } catch (WebSocketException $e) {
                     $e->printStack();
                 }
@@ -299,11 +304,11 @@ class WebSocketServer implements WebSocketServerContract, CommonsContract
     /**
      * Handshakes/upgrade and key parse
      *
-     * @param resource $client Source client socket to write
+     * @param Connection $client Source client socket to write
      * @param string $headers Headers that client has been sent
      * @return string   socket handshake key (Sec-WebSocket-Key)| false on parse error
      */
-    private function handshake($client, string $headers) : string
+    private function handshake(Connection $client, string $headers) : string
     {
         $match = [];
         preg_match(self::SEC_WEBSOCKET_KEY_PTRN, $headers, $match);
@@ -312,13 +317,13 @@ class WebSocketServer implements WebSocketServerContract, CommonsContract
         }
 
         $key = $match[1];
-        $this->handshakes[(int)$client] = $key;
+        $this->handshakes[$client->getId()] = $key;
         // sending header according to WebSocket Protocol
         $secWebSocketAccept = base64_encode(sha1(trim($key) . self::HEADER_WEBSOCKET_ACCEPT_HASH, true));
         $this->setHeadersUpgrade($secWebSocketAccept);
         $upgradeHeaders = $this->getHeadersUpgrade();
 
-        fwrite($client, $upgradeHeaders);
+        fwrite($client->getSocket(), $upgradeHeaders);
         return $key;
     }
 
@@ -380,5 +385,18 @@ class WebSocketServer implements WebSocketServerContract, CommonsContract
                 $left = substr($left, strpos($left, '/', 1));
             }
         }
+    }
+    
+    /**
+     * Finds client by socket
+     * @param resource $socket
+     * @return Connection
+     */
+    private function findClient($socket) {
+        foreach($this->clients as $client) {
+            if ($client->getSocket() === $socket)
+                return $client;
+        }
+        return NULL;
     }
 }
