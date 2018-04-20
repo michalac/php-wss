@@ -39,7 +39,7 @@ class Connection implements ConnectionContract, CommonsContract
      * Returns unique id of connection
      * @return string
      */
-    public function getId() 
+    public function getId() : string
     {
         return $this->id;
     }
