@@ -59,6 +59,8 @@ class Connection implements ConnectionContract, CommonsContract
     public function close() : void
     {
         if (is_resource($this->socketConnection)) {
+            // reply to close message
+            fwrite($this->socketConnection, $this->encode('', self::EVENT_TYPE_CLOSE));
             fclose($this->socketConnection);
         }
     }
