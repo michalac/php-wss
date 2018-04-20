@@ -9,7 +9,7 @@ namespace WSSC\Contracts;
 interface ConnectionContract
 {
 
-    public function getId(): void;
+    public function getId(): string;
     
     public function send($data): void;
 
