@@ -190,6 +190,7 @@ class WebSocketServer implements WebSocketServerContract, CommonsContract
                 } catch (WebSocketException $e) {
                     $e->printStack();
                 }
+                $client->close();
                 // to avoid event leaks
                 unset($this->clients[$client->getId()], $readSocks[$kSock]);
                 continue;
